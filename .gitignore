@@ -1,26 +1,6 @@
-﻿# Node runtime
-node_modules/
-npm-debug.log*
-
-# Python leftovers (legacy)
 __pycache__/
 *.pyc
-*.pyo
-*.pyd
 .venv/
 venv/
-
-# Secrets
 .env
-KEYS.md
-*.secret
-*.token
-*.key
-
-# Runtime output
-storage/*
-!storage/.gitkeep
-
-# Build artifacts
-build/
-dist/
+.vercel
