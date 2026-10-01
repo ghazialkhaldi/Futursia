@@ -196,64 +196,90 @@ function showTicker(data) {
 // ---------------------------------------------------------------------------
 //
 // Green/red candles are real prices, orange candles are the forecast.
-// viewStart / viewEnd are the times (in ms) at the left and right edges.
+// Gray hatched areas are times when the market was closed.
+//
+// The x-axis counts candles, not clock time: each candle gets the next
+// "slot" (0, 1, 2, ...). That way nights and weekends don't show up as huge
+// empty spaces. Instead, each closed period gets a band of fixed width.
+// viewStart / viewEnd are the slot numbers at the left and right edges.
 
-let liveCandles = [];
-let forecastCandles = [];
+const CLOSED_BAND_SLOTS = 30; // width of a "market closed" band, in candles
+
+let candles = []; // real and forecast candles, each with a slot number
+let closedBands = []; // [{ start, end }], in slots
 let viewStart = null;
 let viewEnd = null;
+let userMovedChart = false; // true after zooming or dragging
 
 function setChartData(bars, forecastPath) {
-  liveCandles = bars.map((bar) => ({
-    time: new Date(bar.time).getTime(),
-    open: bar.open,
-    high: bar.high,
-    low: bar.low,
-    close: bar.close,
-  }));
+  const newCandles = [];
+  for (const bar of bars) {
+    newCandles.push({
+      time: new Date(bar.time).getTime(),
+      open: bar.open,
+      high: bar.high,
+      low: bar.low,
+      close: bar.close,
+      isForecast: false,
+    });
+  }
 
   // Turn each step of the forecast line into a candle.
-  forecastCandles = [];
   for (let i = 1; i < forecastPath.length; i++) {
     const open = forecastPath[i - 1].price;
     const close = forecastPath[i].price;
-    forecastCandles.push({
+    newCandles.push({
       time: new Date(forecastPath[i].time).getTime(),
       open,
       close,
       high: Math.max(open, close),
       low: Math.min(open, close),
+      isForecast: true,
     });
   }
 
-  if (viewStart === null) resetChartView();
+  // Give each candle a slot. If more than 30 minutes passed between two
+  // candles, the market was closed in between, so add a closed band.
+  candles = [];
+  closedBands = [];
+  let slot = 0;
+  for (let i = 0; i < newCandles.length; i++) {
+    const candle = newCandles[i];
+    if (i > 0 && candle.time - newCandles[i - 1].time > 30 * MINUTE) {
+      closedBands.push({ start: slot - 0.5, end: slot - 0.5 + CLOSED_BAND_SLOTS });
+      slot += CLOSED_BAND_SLOTS;
+    }
+    candle.slot = slot;
+    slot += 1;
+    candles.push(candle);
+  }
+
+  // Keep following the latest prices unless the user zoomed or dragged.
+  if (!userMovedChart) resetChartView();
   drawChart();
 }
 
-function allCandles() {
-  return liveCandles.concat(forecastCandles);
-}
-
-// Show the last 3 hours of prices plus the 3-hour forecast.
+// Show the last 3 hours (180 candles) of real prices plus the forecast.
 function resetChartView() {
-  const candles = allCandles();
+  userMovedChart = false;
   if (candles.length === 0) {
     viewStart = null;
     viewEnd = null;
     return;
   }
-  viewEnd = candles[candles.length - 1].time + 2 * MINUTE;
-  viewStart = Math.max(candles[0].time, viewEnd - 6 * 60 * MINUTE);
+  const realCandles = candles.filter((c) => !c.isForecast);
+  const firstShown = realCandles[Math.max(0, realCandles.length - 180)];
+  viewStart = firstShown.slot - 1;
+  viewEnd = candles[candles.length - 1].slot + 2;
 }
 
 // Stop the user from zooming or dragging too far away from the data.
 function keepViewInRange() {
-  const candles = allCandles();
-  const first = candles[0].time - 5 * MINUTE;
-  const last = candles[candles.length - 1].time + 5 * MINUTE;
+  const first = candles[0].slot - 5;
+  const last = candles[candles.length - 1].slot + 5;
 
   let width = viewEnd - viewStart;
-  width = Math.max(width, 10 * MINUTE); // at least 10 minutes
+  width = Math.max(width, 10); // at least 10 candles
   width = Math.min(width, last - first); // at most all the data
 
   let start = viewStart;
@@ -267,9 +293,10 @@ function keepViewInRange() {
 // factor < 1 zooms in, > 1 zooms out. anchor (0 to 1) is the point that stays still.
 function zoom(factor, anchor = 0.5) {
   if (viewStart === null) return;
-  const anchorTime = viewStart + (viewEnd - viewStart) * anchor;
-  viewStart = anchorTime - (anchorTime - viewStart) * factor;
-  viewEnd = anchorTime + (viewEnd - anchorTime) * factor;
+  userMovedChart = true;
+  const anchorSlot = viewStart + (viewEnd - viewStart) * anchor;
+  viewStart = anchorSlot - (anchorSlot - viewStart) * factor;
+  viewEnd = anchorSlot + (viewEnd - anchorSlot) * factor;
   drawChart();
 }
 
@@ -279,6 +306,15 @@ function svgElement(name, attributes) {
     element.setAttribute(key, attributes[key]);
   }
   return element;
+}
+
+// The candle closest to a slot, used for the time labels.
+function nearestCandle(slot) {
+  let best = candles[0];
+  for (const candle of candles) {
+    if (Math.abs(candle.slot - slot) < Math.abs(best.slot - slot)) best = candle;
+  }
+  return best;
 }
 
 function drawChart() {
@@ -304,9 +340,7 @@ function drawChart() {
   const bottom = height - 36;
 
   // Only the candles inside the current view.
-  const visibleLive = liveCandles.filter((c) => c.time >= viewStart && c.time <= viewEnd);
-  const visibleForecast = forecastCandles.filter((c) => c.time >= viewStart && c.time <= viewEnd);
-  const visible = visibleLive.concat(visibleForecast);
+  const visible = candles.filter((c) => c.slot >= viewStart && c.slot <= viewEnd);
   if (visible.length === 0) return;
 
   // Price range, with a little space above and below.
@@ -316,8 +350,8 @@ function drawChart() {
   lowPrice -= padding;
   highPrice += padding;
 
-  // Convert a time to an x position and a price to a y position.
-  const x = (time) => left + ((time - viewStart) / (viewEnd - viewStart)) * (right - left);
+  // Convert a slot to an x position and a price to a y position.
+  const x = (slot) => left + ((slot - viewStart) / (viewEnd - viewStart)) * (right - left);
   const y = (price) => top + ((highPrice - price) / (highPrice - lowPrice)) * (bottom - top);
 
   // Horizontal grid lines with prices.
@@ -329,34 +363,57 @@ function drawChart() {
     svg.appendChild(label);
   }
 
-  // Vertical grid lines with times.
+  // Vertical grid lines, labelled with the time of the nearest candle.
   for (let i = 0; i <= 6; i++) {
     const lineX = left + ((right - left) * i) / 6;
     svg.appendChild(svgElement("line", { x1: lineX, x2: lineX, y1: top, y2: bottom, stroke: "#1d272d" }));
     const label = svgElement("text", { x: lineX, y: height - 8, fill: "#89a0a9", "font-size": 10, "text-anchor": "middle" });
-    const time = viewStart + ((viewEnd - viewStart) * i) / 6;
-    label.textContent = new Date(time).toLocaleString("en-US", {
+    const slot = viewStart + ((viewEnd - viewStart) * i) / 6;
+    label.textContent = new Date(nearestCandle(slot).time).toLocaleString("en-US", {
       month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit", hour12: false,
     });
     svg.appendChild(label);
   }
 
-  // Each candle is a thin line (high to low) plus a box (open to close).
-  const candleWidth = Math.max(1, Math.min(14, (MINUTE / (viewEnd - viewStart)) * (right - left) * 0.7));
+  // Gray diagonal lines where the market was closed. The lines come from a
+  // "pattern": a small tile with one line on it, repeated and tilted 45°.
+  const defs = svgElement("defs", {});
+  const pattern = svgElement("pattern", {
+    id: "closedLines", width: 8, height: 8, patternUnits: "userSpaceOnUse", patternTransform: "rotate(45)",
+  });
+  pattern.appendChild(svgElement("line", { x1: 0, y1: 0, x2: 0, y2: 8, stroke: "#4b5a66", "stroke-width": 2 }));
+  defs.appendChild(pattern);
+  svg.appendChild(defs);
 
-  function drawCandle(candle, color) {
-    const centerX = x(candle.time);
+  for (const band of closedBands) {
+    const bandLeft = Math.max(left, x(band.start));
+    const bandRight = Math.min(right, x(band.end));
+    if (bandRight <= bandLeft) continue; // not in view
+    svg.appendChild(svgElement("rect", {
+      x: bandLeft, y: top, width: bandRight - bandLeft, height: bottom - top, fill: "url(#closedLines)",
+    }));
+    if (bandRight - bandLeft > 60) {
+      const label = svgElement("text", {
+        x: (bandLeft + bandRight) / 2, y: top + 16, fill: "#9fb0bc", "font-size": 11, "text-anchor": "middle",
+      });
+      label.textContent = "Market closed";
+      svg.appendChild(label);
+    }
+  }
+
+  // Each candle is a thin line (high to low) plus a box (open to close).
+  const candleWidth = Math.max(1, Math.min(14, ((right - left) / (viewEnd - viewStart)) * 0.7));
+
+  for (const candle of visible) {
+    let color = "#ff9f43"; // forecast: orange
+    if (!candle.isForecast) {
+      color = candle.close >= candle.open ? "#25c26e" : "#ef5350"; // up: green, down: red
+    }
+    const centerX = x(candle.slot);
     const boxTop = Math.min(y(candle.open), y(candle.close));
     const boxHeight = Math.max(1, Math.abs(y(candle.open) - y(candle.close)));
     svg.appendChild(svgElement("line", { x1: centerX, x2: centerX, y1: y(candle.high), y2: y(candle.low), stroke: color }));
     svg.appendChild(svgElement("rect", { x: centerX - candleWidth / 2, y: boxTop, width: candleWidth, height: boxHeight, fill: color }));
-  }
-
-  for (const candle of visibleLive) {
-    drawCandle(candle, candle.close >= candle.open ? "#25c26e" : "#ef5350");
-  }
-  for (const candle of visibleForecast) {
-    drawCandle(candle, "#ff9f43");
   }
 }
 
@@ -396,8 +453,9 @@ function setupChartControls() {
   svg.addEventListener("pointermove", (event) => {
     if (dragStartX === null) return;
     const width = viewEnd - viewStart;
-    const movedTime = ((event.clientX - dragStartX) / svg.clientWidth) * width;
-    viewStart = dragStartView - movedTime;
+    const movedSlots = ((event.clientX - dragStartX) / svg.clientWidth) * width;
+    userMovedChart = true;
+    viewStart = dragStartView - movedSlots;
     viewEnd = viewStart + width;
     drawChart();
   });

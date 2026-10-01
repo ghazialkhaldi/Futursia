@@ -11,7 +11,7 @@ from flask import Flask, jsonify, send_from_directory
 
 from forecast import make_forecast, make_forecast_path
 from stocks import STOCKS
-from yahoo import get_bars, get_chart, get_quote, is_market_open
+from yahoo import get_bars, get_chart, get_quote, get_session_times, is_market_open
 
 CHART_BARS = 240  # how many 1-minute bars to send to the chart (4 hours)
 PUBLIC_FOLDER = os.path.join(os.path.dirname(os.path.abspath(__file__)), "public")
@@ -68,6 +68,7 @@ def ticker(symbol):
         chart = get_chart(symbol, "5d", "1m", 5)
         bars = get_bars(chart)
         forecast = make_forecast(bars)
+        session_open, session_close = get_session_times(chart)
 
         return jsonify({
             "symbol": symbol,
@@ -76,7 +77,7 @@ def ticker(symbol):
             "market_open": is_market_open(chart),
             "forecast": forecast,
             "bars": bars[-CHART_BARS:],
-            "forecast_path": make_forecast_path(bars, forecast),
+            "forecast_path": make_forecast_path(symbol, bars, forecast, session_open, session_close),
         })
     except Exception as error:
         return jsonify({"error": str(error)}), 500

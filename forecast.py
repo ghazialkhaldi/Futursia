@@ -13,6 +13,7 @@
 # that could be predicted was that stocks in general tend to rise, so every
 # stock would just say UP.
 
+import random
 from datetime import datetime, timedelta
 
 FORECAST_MINUTES = 3 * 60  # 3 hours
@@ -58,22 +59,69 @@ def make_forecast(bars):
     }
 
 
-def make_forecast_path(bars, forecast):
-    """The forecast as a straight line of prices, one per minute, from the
-    last real bar to the target price. The chart draws these as orange candles."""
-    if len(bars) == 0:
+def next_trading_minute(time, session_open, session_close):
+    """The next minute the market is open, skipping nights and weekends.
+
+    session_open and session_close are the opening and closing times of a
+    trading day (in UTC). Only their time of day is used.
+    """
+    time = time + timedelta(minutes=1)
+
+    # After the close: jump to the next morning's open.
+    if time.time() >= session_close.time():
+        time = time + timedelta(days=1)
+        time = time.replace(hour=session_open.hour, minute=session_open.minute)
+
+    # Skip Saturday (5) and Sunday (6).
+    while time.weekday() >= 5:
+        time = time + timedelta(days=1)
+
+    return time
+
+
+def make_forecast_path(symbol, bars, forecast, session_open, session_close):
+    """The forecast as a list of prices, one per trading minute, from the last
+    real bar to the target price. The chart draws these as orange candles.
+
+    A straight line would look unnatural, so we add random ups and downs the
+    same size as the stock's usual minute-to-minute moves. The line is then
+    bent so it still ends exactly on the target price. The wiggles only show
+    what a typical path looks like; the forecast itself is the end point.
+    """
+    if len(bars) < 2:
         return []
 
-    last_bar = bars[-1]
-    start_time = datetime.fromisoformat(last_bar["time"])
-    start_price = last_bar["close"]
-    path = []
+    start_price = bars[-1]["close"]
+    target_price = forecast["target_price"]
 
+    # How much the price usually moves in one minute, in percent
+    # (the average size of the moves over the last 2 hours).
+    recent = bars[-121:]
+    moves = []
+    for i in range(1, len(recent)):
+        moves.append(abs(recent[i]["close"] / recent[i - 1]["close"] - 1) * 100)
+    typical_move = sum(moves) / len(moves)
+
+    # A random walk: each minute, a random step up or down of about that size.
+    # Using the stock and date as the "seed" gives the same random shape every
+    # time the page refreshes, instead of a new jumpy shape every 5 seconds.
+    rng = random.Random(symbol + bars[-1]["time"][:10])
+    walk = [0]
+    for minute in range(FORECAST_MINUTES):
+        walk.append(walk[-1] + rng.gauss(0, typical_move))
+
+    path = []
+    time = datetime.fromisoformat(bars[-1]["time"])
     for minute in range(FORECAST_MINUTES + 1):
         progress = minute / FORECAST_MINUTES
+        straight_line = start_price + (target_price - start_price) * progress
+        # Bend the walk so it's 0 at the start and 0 at the end,
+        # which makes the path finish exactly on the target price.
+        wiggle = walk[minute] - walk[-1] * progress
         path.append({
-            "time": (start_time + timedelta(minutes=minute)).isoformat(),
-            "price": start_price + (forecast["target_price"] - start_price) * progress,
+            "time": time.isoformat(),
+            "price": straight_line * (1 + wiggle / 100),
         })
+        time = next_trading_minute(time, session_open, session_close)
 
     return path

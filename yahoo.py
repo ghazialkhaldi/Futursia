@@ -90,3 +90,11 @@ def is_market_open(chart):
     session = chart["meta"]["currentTradingPeriod"]["regular"]
     now = time.time()
     return session["start"] <= now < session["end"]
+
+
+def get_session_times(chart):
+    """Opening and closing time of the regular trading session, in UTC."""
+    session = chart["meta"]["currentTradingPeriod"]["regular"]
+    session_open = datetime.fromtimestamp(session["start"], timezone.utc)
+    session_close = datetime.fromtimestamp(session["end"], timezone.utc)
+    return session_open, session_close
