@@ -2,16 +2,16 @@
 #
 # Idea: over the next 3 hours, a stock tends to drift back toward its
 # average price for the day. If it's trading above today's average we lean
-# DOWN, if below we lean UP.
+# DOWN, if below we lean UP. If it's very close to the average, FLAT.
 #
-# We tested this on 60 days of 5-minute data for all 90 stocks on the site.
-# Over 3 hours it picked the right direction about 52-54% of the time, which
-# is better than over 40 minutes (51%). When the price is very close to the
-# average the result was a coin flip, so we say FLAT.
+# How well does it work? Only a little better than a coin flip:
+# - On 60 days of 5-minute data for all 90 stocks: right 52-54% of the time.
+# - On 2 years of hourly data: right 50.6% of the time.
+# So treat it as a small lean, not a prediction you can count on.
 #
 # We also tested days, weeks and months ahead. Over those, the only thing
 # that could be predicted was that stocks in general tend to rise, so every
-# stock would just say UP. 3 hours was the best time span for this rule.
+# stock would just say UP.
 
 from datetime import datetime, timedelta
 
@@ -20,7 +20,8 @@ FORECAST_MINUTES = 3 * 60  # 3 hours
 
 def make_forecast(bars):
     if len(bars) == 0:
-        return {"direction": "FLAT", "return_percent": 0, "confidence": 50, "target_price": None}
+        return {"direction": "FLAT", "return_percent": 0, "target_price": None,
+                "average_price": None, "difference_percent": 0}
 
     # Only use bars from the most recent trading day.
     # The first 10 characters of the time are the date, like "2026-09-30".
@@ -33,27 +34,27 @@ def make_forecast(bars):
         total += bar["close"]
     average = total / len(today_bars)
 
-    # How far the average is from the price, in percent.
-    # Positive = price is below the average (expect a move up).
-    gap_percent = (average - price) / price * 100
-    gap_size = abs(gap_percent)
+    # How far the price is from today's average, in percent.
+    # Negative = price is below the average, positive = above.
+    difference_percent = (price - average) / average * 100
 
-    # Expect the price to close about 8% of that gap in 3 hours.
-    # (0.08 is the best fit from the test data.)
-    return_percent = gap_percent * 0.08
+    # Expect the price to move back about 8% of the way toward the average
+    # in 3 hours. (0.08 is the best fit from the test data.)
+    return_percent = -difference_percent * 0.08
 
-    # Confidence = how often the direction was right in testing.
+    # Within 0.1% of the average there's no signal, so we say FLAT.
     direction = "FLAT"
-    confidence = 50
-    if gap_size >= 0.1:
-        direction = "UP" if gap_percent > 0 else "DOWN"
-        confidence = 54 if gap_size >= 0.25 else 52
+    if difference_percent <= -0.1:
+        direction = "UP"
+    if difference_percent >= 0.1:
+        direction = "DOWN"
 
     return {
         "direction": direction,
         "return_percent": return_percent,
-        "confidence": confidence,
         "target_price": price * (1 + return_percent / 100),
+        "average_price": average,
+        "difference_percent": difference_percent,
     }
 
 

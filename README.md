@@ -27,15 +27,16 @@ Then open http://localhost:8000
 ## How the forecast works
 
 Over the next 3 hours a stock tends to drift back toward its average price for
-the day. If it's above today's average the forecast is DOWN, below it's UP. The
-expected move is 8% of the gap between the price and the average. If the price
-is within 0.1% of the average, the forecast is FLAT.
+the day. If it's below today's average the forecast is UP, above it's DOWN. The
+expected move is 8% of the way back to the average. If the price is within
+0.1% of the average, the forecast is FLAT. The Ticker page shows how far the
+price is from today's average, so you can see how strong the signal is.
 
-Tested on 60 days of 5-minute data for all 90 stocks, it picked the right
-direction 52% of the time, and about 54% when the price was 0.25% or more
-away from its average. That's better than a 40-minute forecast (51%).
+How well it works: on 60 days of 5-minute data for all 90 stocks it picked the
+right direction 52-54% of the time, but on 2 years of hourly data only 50.6%.
+So it's only a little better than a coin flip, and treat it as a small lean,
+not something you can count on.
 
 Longer forecasts (days to months) were also tested. Over those, the only
 pattern was that stocks in general tend to go up, so every stock would just
-say UP. Short-term moves are mostly random, so treat the forecast as a small
-lean, not something you can count on.
+say UP.

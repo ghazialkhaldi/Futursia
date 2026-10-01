@@ -172,10 +172,17 @@ function showTicker(data) {
   setText("priceChange", signed(quote.change_percent, 2, "% today"), colorFor(quote.change_percent));
 
   setText("forecastDirection", forecast.direction, colorFor(forecast.direction));
-  setText("forecastReturn", signed(forecast.return_percent, 3, "%"), colorFor(forecast.direction));
+  setText(
+    "forecastReturn",
+    signed(forecast.return_percent, 3, "%") + " → " + money(forecast.target_price),
+    colorFor(forecast.direction)
+  );
 
-  setText("forecastConfidence", forecast.confidence.toFixed(0) + "%");
-  setText("forecastTarget", "Target " + money(forecast.target_price));
+  // e.g. "0.83% below" when the price is under today's average.
+  const difference = forecast.difference_percent;
+  const aboveOrBelow = difference < 0 ? "below" : "above";
+  setText("averageDifference", Math.abs(difference).toFixed(2) + "% " + aboveOrBelow);
+  setText("averagePrice", "Today's average " + money(forecast.average_price));
 
   setText("marketStatus", data.market_open ? "OPEN" : "CLOSED", data.market_open ? "txt-up" : "txt-down");
   const lastBar = data.bars[data.bars.length - 1];
